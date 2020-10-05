@@ -202,122 +202,130 @@ create_sources_list()
 #
 fetch_from_repo()
 {
-	local url=$1
-	local dir=$2
-	local ref=$3
-	local ref_subdir=$4
+	if [ ${ALLOW_UPDATE_SOURCE} == "1" ]; then
+		local url=$1
+		local dir=$2
+		local ref=$3
+		local ref_subdir=$4
 
-	# The 'offline' variable must always be set to 'true' or 'false'
-	if [ "$OFFLINE_WORK" == "yes" ]; then
-		local offline=true
-	else
-		local offline=false
-	fi
+		# The 'offline' variable must always be set to 'true' or 'false'
+		if [ "$OFFLINE_WORK" == "yes" ]; then
+			local offline=true
+		else
+			local offline=false
+		fi
 
-	[[ -z $ref || ( $ref != tag:* && $ref != branch:* && $ref != head && $ref != commit:* ) ]] && exit_with_error "Error in configuration"
-	local ref_type=${ref%%:*}
-	if [[ $ref_type == head ]]; then
-		local ref_name=HEAD
-	else
-		local ref_name=${ref##*:}
-	fi
+		[[ -z $ref || ( $ref != tag:* && $ref != branch:* && $ref != head && $ref != commit:* ) ]] && exit_with_error "Error in configuration"
+		local ref_type=${ref%%:*}
+		if [[ $ref_type == head ]]; then
+			local ref_name=HEAD
+		else
+			local ref_name=${ref##*:}
+		fi
 
-	display_alert "Checking git sources" "$dir $ref_name" "info"
+		display_alert "Checking git sources" "$dir $ref_name" "info"
 
-	# get default remote branch name without cloning
-	# local ref_name=$(git ls-remote --symref $url HEAD | grep -o 'refs/heads/\S*' | sed 's%refs/heads/%%')
-	# for git:// protocol comparing hashes of "git ls-remote -h $url" and "git ls-remote --symref $url HEAD" is needed
+		# get default remote branch name without cloning
+		# local ref_name=$(git ls-remote --symref $url HEAD | grep -o 'refs/heads/\S*' | sed 's%refs/heads/%%')
+		# for git:// protocol comparing hashes of "git ls-remote -h $url" and "git ls-remote --symref $url HEAD" is needed
 
-	if [[ $ref_subdir == yes ]]; then
-		local workdir=$dir/$ref_name
-	else
-		local workdir=$dir
-	fi
+		if [[ $ref_subdir == yes ]]; then
+			local workdir=$dir/$ref_name
+		else
+			local workdir=$dir
+		fi
 
-	mkdir -p "${SRC}/cache/sources/${workdir}" 2>/dev/null || \
-		exit_with_error "No path or no write permission" "${SRC}/cache/sources/${workdir}"
+		mkdir -p "${SRC}/cache/sources/${workdir}" 2>/dev/null || \
+			exit_with_error "No path or no write permission" "${SRC}/cache/sources/${workdir}"
 
-	cd "${SRC}/cache/sources/${workdir}" || exit
+		cd "${SRC}/cache/sources/${workdir}" || exit
 
-	# check if existing remote URL for the repo or branch does not match current one
-	# may not be supported by older git versions
-	#  Check the folder as a git repository.
-	#  Then the target URL matches the local URL.
+		# check if existing remote URL for the repo or branch does not match current one
+		# may not be supported by older git versions
+		#  Check the folder as a git repository.
+		#  Then the target URL matches the local URL.
 
-	if [[ "$(git rev-parse --git-dir 2>/dev/null)" == ".git" && \
-		  "$url" != "$(git remote get-url origin 2>/dev/null)" ]]; then
-		display_alert "Remote URL does not match, removing existing local copy"
-		rm -rf .git ./*
-	fi
+		if [[ "$(git rev-parse --git-dir 2>/dev/null)" == ".git" && \
+			"$url" != "$(git remote get-url origin 2>/dev/null)" ]]; then
+			display_alert "Remote URL does not match, removing existing local copy"
+			rm -rf .git ./*
+		fi
 
-	if [[ "$(git rev-parse --git-dir 2>/dev/null)" != ".git" ]]; then
-		display_alert "Creating local copy"
-		git init -q .
-		git remote add origin "${url}"
-		# Here you need to upload from a new address
-		offline=false
-	fi
+		if [[ "$(git rev-parse --git-dir 2>/dev/null)" != ".git" ]]; then
+			display_alert "Creating local copy"
+			git init -q .
+			git remote add origin "${url}"
+			# Here you need to upload from a new address
+			offline=false
+		fi
 
-	local changed=false
+		local changed=false
 
-	# when we work offline we simply return the sources to their original state
-	if ! $offline; then
-		local local_hash
-		local_hash=$(git rev-parse @ 2>/dev/null)
+		# when we work offline we simply return the sources to their original state
+		if ! $offline; then
+			local local_hash
+			local_hash=$(git rev-parse @ 2>/dev/null)
 
-		case $ref_type in
-			branch)
-			# TODO: grep refs/heads/$name
-			local remote_hash
-			remote_hash=$(git ls-remote -h "${url}" "$ref_name" | head -1 | cut -f1)
-			[[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
-			;;
+			case $ref_type in
+				branch)
+				# TODO: grep refs/heads/$name
+				local remote_hash
+				remote_hash=$(git ls-remote -h "${url}" "$ref_name" | head -1 | cut -f1)
+				[[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
+				;;
 
-			tag)
-			local remote_hash
-			remote_hash=$(git ls-remote -t "${url}" "$ref_name" | cut -f1)
-			if [[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]]; then
-				remote_hash=$(git ls-remote -t "${url}" "$ref_name^{}" | cut -f1)
-				[[ -z $remote_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
-			fi
-			;;
+				tag)
+				local remote_hash
+				remote_hash=$(git ls-remote -t "${url}" "$ref_name" | cut -f1)
+				if [[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]]; then
+					remote_hash=$(git ls-remote -t "${url}" "$ref_name^{}" | cut -f1)
+					[[ -z $remote_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
+				fi
+				;;
 
-			head)
-			local remote_hash
-			remote_hash=$(git ls-remote "${url}" HEAD | cut -f1)
-			[[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
-			;;
+				head)
+				local remote_hash
+				remote_hash=$(git ls-remote "${url}" HEAD | cut -f1)
+				[[ -z $local_hash || "${local_hash}" != "${remote_hash}" ]] && changed=true
+				;;
 
-			commit)
-			[[ -z $local_hash || $local_hash == "@" ]] && changed=true
-			;;
-		esac
+				commit)
+				[[ -z $local_hash || $local_hash == "@" ]] && changed=true
+				;;
+			esac
 
-	fi # offline
+		fi # offline
+		
+		if [[ $changed == true ]]; then
 
-	if [[ $changed == true ]]; then
+			# remote was updated, fetch and check out updates
+			display_alert "Fetching updates"
+			case $ref_type in
+				branch) git fetch --depth 1 origin "${ref_name}" ;;
+				tag) git fetch --depth 1 origin tags/"${ref_name}" ;;
+				head) git fetch --depth 1 origin HEAD ;;
+			esac
 
-		# remote was updated, fetch and check out updates
-		display_alert "Fetching updates"
-		case $ref_type in
-			branch) git fetch --depth 1 origin "${ref_name}" ;;
-			tag) git fetch --depth 1 origin tags/"${ref_name}" ;;
-			head) git fetch --depth 1 origin HEAD ;;
-		esac
+			# commit type needs support for older git servers that doesn't support fetching id directly
+			if [[ $ref_type == commit ]]; then
 
-		# commit type needs support for older git servers that doesn't support fetching id directly
-		if [[ $ref_type == commit ]]; then
+				git fetch --depth 1 origin "${ref_name}"
 
-			git fetch --depth 1 origin "${ref_name}"
+				# cover old type
+				if [[ $? -ne 0 ]]; then
 
-			# cover old type
-			if [[ $? -ne 0 ]]; then
+					display_alert "Commit checkout not supported on this repository. Doing full clone." "" "wrn"
+					git pull
+					git checkout -fq "${ref_name}"
+					display_alert "Checkout out to" "$(git --no-pager log -2 --pretty=format:"$ad%s [%an]" | head -1)" "info"
 
-				display_alert "Commit checkout not supported on this repository. Doing full clone." "" "wrn"
-				git pull
-				git checkout -fq "${ref_name}"
-				display_alert "Checkout out to" "$(git --no-pager log -2 --pretty=format:"$ad%s [%an]" | head -1)" "info"
+				else
 
+					display_alert "Checking out"
+					git checkout -f -q FETCH_HEAD
+					git clean -qdf
+
+				fi
 			else
 
 				display_alert "Checking out"
@@ -325,43 +333,37 @@ fetch_from_repo()
 				git clean -qdf
 
 			fi
-		else
+		elif [[ -n $(git status -uno --porcelain --ignore-submodules=all) ]]; then
+			# working directory is not clean
+			display_alert " Cleaning .... " "$(git status -s | wc -l) files"
 
-			display_alert "Checking out"
-			git checkout -f -q FETCH_HEAD
+			# Return the files that are tracked by git to the initial state.
+			git checkout -f -q HEAD
+
+			# Files that are not tracked by git and were added
+			# when the patch was applied must be removed.
 			git clean -qdf
-
+		else
+			# working directory is clean, nothing to do
+			display_alert "Up to date"
 		fi
-	elif [[ -n $(git status -uno --porcelain --ignore-submodules=all) ]]; then
-		# working directory is not clean
-		display_alert " Cleaning .... " "$(git status -s | wc -l) files"
 
-		# Return the files that are tracked by git to the initial state.
-		git checkout -f -q HEAD
-
-		# Files that are not tracked by git and were added
-		# when the patch was applied must be removed.
-		git clean -qdf
-	else
-		# working directory is clean, nothing to do
-		display_alert "Up to date"
-	fi
-
-	if [[ -f .gitmodules ]]; then
-		display_alert "Updating submodules" "" "ext"
-		# FML: http://stackoverflow.com/a/17692710
-		for i in $(git config -f .gitmodules --get-regexp path | awk '{ print $2 }'); do
-			cd "${SRC}/cache/sources/${workdir}" || exit
-			local surl sref
-			surl=$(git config -f .gitmodules --get "submodule.$i.url")
-			sref=$(git config -f .gitmodules --get "submodule.$i.branch")
-			if [[ -n $sref ]]; then
-				sref="branch:$sref"
-			else
-				sref="head"
-			fi
-			fetch_from_repo "$surl" "$workdir/$i" "$sref"
-		done
+		if [[ -f .gitmodules ]]; then
+			display_alert "Updating submodules" "" "ext"
+			# FML: http://stackoverflow.com/a/17692710
+			for i in $(git config -f .gitmodules --get-regexp path | awk '{ print $2 }'); do
+				cd "${SRC}/cache/sources/${workdir}" || exit
+				local surl sref
+				surl=$(git config -f .gitmodules --get "submodule.$i.url")
+				sref=$(git config -f .gitmodules --get "submodule.$i.branch")
+				if [[ -n $sref ]]; then
+					sref="branch:$sref"
+				else
+					sref="head"
+				fi
+				fetch_from_repo "$surl" "$workdir/$i" "$sref"
+			done
+		fi
 	fi
 } #############################################################################
 
